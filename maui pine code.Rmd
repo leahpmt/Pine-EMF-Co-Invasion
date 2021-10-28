@@ -1,0 +1,493 @@
+---
+title: The success of pine seedlings increases when their Suillus ectomycorrhizal
+  fungal mutualists are released from competition in a Hawaiian co-invasion landscape
+author: "Leah Thompson"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    
+---
+***
+```{r setup, include=FALSE}
+library(knitr)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+####Required packages
+
+```{r packages, message=FALSE, warning=FALSE}
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(ggeffects)
+library(vegan)
+library(phyloseq)
+library(devtools)
+library(pairwiseAdonis)
+library(otuSummary)
+library(pheatmap)
+
+```
+
+***
+####Data files
+```{r data files}
+#Percent Colonization data
+tsectall <- read.csv("tsectallCLEAN.csv")
+#make sure transects are characters and not integers
+tsectall$Transect <- as.character(tsectall$Transect)
+
+#Bioassay survival data
+survival <- read.csv("transect_survival.csv")
+
+colnames(survival)[1] <- "transect"
+
+#Heatmap abundance
+abundance_otu <- read.csv("heatmap_abundance_table.csv",check.names=FALSE)
+
+#suillus pungens abundance and qpcr data
+s_p_rel_abund_qpcr <- read.csv("s_pungens_abundance_qpcr_comparison.csv")
+
+```
+
+```{r phyloseq data}
+#prepping the OTU and TAX Table
+
+#read in the OTU table, change the column names to that they are readable, get rid of the first column, and make it a matrix
+tran_phyloseq_otu_table <- read.csv("transect_phyloseq_otu_table.csv", check.names = F)
+
+colnames(tran_phyloseq_otu_table)[1] <- "OTU_ID"
+
+row.names(tran_phyloseq_otu_table) <- tran_phyloseq_otu_table$OTU_ID
+
+tran_phyloseq_otu_table <- tran_phyloseq_otu_table[-1]
+
+tran_phyloseq_otu_table <- as.matrix(tran_phyloseq_otu_table)
+
+#read in the taxonomy table, change the column names to that they are readable, get rid of the first column, and make it a matrix
+tran_phyloseq_tax_table <- read.csv("transect_phyloseq_tax_table.csv")
+
+colnames(tran_phyloseq_tax_table)[1] <- "OTU_ID"
+
+row.names(tran_phyloseq_tax_table) <- tran_phyloseq_tax_table$OTU_ID
+
+tran_phyloseq_tax_table <- tran_phyloseq_tax_table[-1]
+
+tran_phyloseq_tax_table <- as.matrix(tran_phyloseq_tax_table)
+
+#phyloseq objects
+
+OTU = otu_table(tran_phyloseq_otu_table, taxa_are_rows = TRUE)
+TAX = tax_table(tran_phyloseq_tax_table)
+transect_physeq <- phyloseq(OTU,TAX)
+
+# read in the sample data,make the transects and distance factored and in order, fix the column names, delete the first column
+
+tran_phyloseq_sample_data <- read.csv("transect_phyloseq_sample_data.csv")
+tran_phyloseq_sample_data$Transect <- as.factor(tran_phyloseq_sample_data$Transect)
+tran_phyloseq_sample_data$Distance <- factor(tran_phyloseq_sample_data$Distance, levels = c("Plantation","Invasion Front","100 m","500 m","1000 m", "2000 m"))
+colnames(tran_phyloseq_sample_data)[1] <- "Sample_ID"
+row.names(tran_phyloseq_sample_data) <- tran_phyloseq_sample_data$Sample_ID
+tran_phyloseq_sample_data <- tran_phyloseq_sample_data[-1]
+
+sampledata = sample_data(tran_phyloseq_sample_data)
+
+#merge
+transect_physeq <- merge_phyloseq(transect_physeq, sampledata)
+
+#remove controls
+transect_physeq_no_control <- subset_samples(transect_physeq, Distance != "Control")
+
+#remove samples with no readsd
+transect_physeq_no_control <- prune_samples(sample_sums(transect_physeq_no_control)>0, transect_physeq_no_control)
+
+
+```
+
+
+***
+
+#Bioassays
+
+### Compare controls against non controls
+
+```{r controls}
+#use an ANOVA to compare the percent colonization of the controls to the non controls
+Transects_vs_Controls <-aov(perc_col ~ TvC, data = tsectall)
+summary(Transects_vs_Controls)
+```
+There is a highly significant difference between the control bioassays and the rest of the samples. 
+
+```{r remove controls}
+#remove controls 
+tsectall <- na.omit(tsectall)
+```
+
+
+###Bioassay Survival
+
+```{r bioassay survival}
+
+survival$percent <- (survival$died/survival$total)
+survival$transect <- as.factor(survival$transect)
+
+#anovas to test for significance of distance and transect number on survivorship
+distance_aov <- aov(percent ~ distance, data=survival)
+summary(distance_aov)
+
+transect_aov <- aov(percent ~ transect, data=survival)
+summary(transect_aov)
+
+```
+
+Distance along the transect had no significant relationship to survival of the bioassays, while it seem that there were some differences in survival based on transect number
+
+###Average Percent Colonization
+
+
+```{r average percent colonization}
+avgtsectpercol <- mean(tsectall$perc_col)
+#average percent colonization
+print(paste("Average Percent Colonization:",avgtsectpercol))
+
+#standard deviation
+print(paste("Standard Deviation:",sd(tsectall$perc_col)))
+
+#95% Confidence Interval
+print(paste("95PI:",qnorm(.975)*(0.221485382848892/sqrt(178))))
+
+```
+
+###Table 1: ANOVA of Percent Colonization, Distance Class, Total Biomass, and Age
+
+```{r anova of per col}
+
+#GLM
+binomial_model <- glm(cbind(Colonized, Uncolonized) ~ Distance_num*Total.Biomass + Age,
+                      family=binomial(logit), data=tsectall)
+
+par(mfrow = c(2, 2))
+plot(binomial_model)
+
+
+#Anova
+transect_aov <- aov(perc_col ~ Distance_num*Total.Biomass + Age, data=tsectall)
+summary(transect_aov, type=2)
+
+par(mfrow = c(2, 2))
+plot(transect_aov)
+
+#get the r squared values
+
+#the total sum of squares
+Total_SS <- sum(2.075,0.832,0.015,0.003,5.654)
+
+#Distance Class r squared
+Distance_R_squared <- 2.075/Total_SS
+print(paste("Distance R squared:",Distance_R_squared))
+
+#Biomass r squared
+TotalBiomass_R_squared <- 0.832/Total_SS
+print(paste("Total Biomass R squared:",TotalBiomass_R_squared))
+
+#Distance and Biomass together
+print(paste("Distance + Total Biomass R Sqaured:",Distance_R_squared+TotalBiomass_R_squared))
+
+```
+
+###Figure 1  Percent Colonization Vs Distance and Biomass
+####Percent colonization by ectomycorrhizal fungi in pine seedling bioassays roots grown soil collected from increasing distance from a pine plantation regressed against distance from the pine plantation (a) and total bioassay biomass (b).
+
+```{r fig 1}
+
+# Percent Colonization and Distance
+
+# Extract the prediction data frame
+pred.mm <- ggpredict(binomial_model, terms = c("Distance_num"))  # this gives overall predictions for the model
+
+# Plot the predictions 
+pc_v_d <- (ggplot(pred.mm) + 
+   geom_line(aes(x = x, y = predicted)) +          # slope
+   geom_ribbon(aes(x = x, ymin = predicted - std.error, ymax = predicted + std.error), 
+               fill = "lightgrey", alpha = 0.5) +  # error band
+   geom_point(data = tsectall,                      # adding the raw data (scaled values)
+              aes(x = Distance_num, y = perc_col
+                  , colour = Transect
+                  ))
+  + labs(x = "Distance (m)", y = "Percent Colonization (%)"
+       ) +
+   annotate(x=330, y=.9, 
+         #label=paste("R^2 = 0.412, p = 0.00680 "),
+         label=paste("R^2 = 0.241, p < 0.001 "),
+         geom="text", size=2)
+  + theme_classic()
+  +theme(text = element_text(size = 8))  
+  
+)
+
+#Percent Colonization and Total Biomass
+# Extract the prediction data frame
+pred.mm2 <- ggpredict(binomial_model, terms = c("Total.Biomass"))  # this gives overall predictions for the model
+
+# Plot the predictions 
+
+pc_v_b <- (ggplot(pred.mm2) + 
+   geom_line(aes(x = x, y = predicted)) +          # slope
+   geom_ribbon(aes(x = x, ymin = predicted - std.error, ymax = predicted + std.error), 
+               fill = "lightgrey", alpha = 0.5) +  # error band
+   geom_point(data = tsectall,                      # adding the raw data (scaled values)
+              aes(x = Total.Biomass, y = perc_col
+                  , colour = Transect
+                  )) + 
+   labs(x = "Biomass (g)", y = "Percent Colonization (%)") + 
+   annotate(x=.3, y=.9, 
+         #label=paste("R^2 = 0.412, p = 0.00680 "),
+         label=paste("R^2 = 0.097, p < 0.001 "),
+         geom="text", size=2)
+  + theme_classic()
+  +
+  theme(text = element_text(size = 8))
+
+)
+
+#combine the figures
+ggarrange(pc_v_d, pc_v_b, labels = c("a", "b"), ncol = 1,
+  nrow = 2, common.legend = TRUE, legend = "right", font.label = list(size = 12), hjust = -.5, align = c("hv"))
+
+```
+
+
+###Figure 2: Heatmap
+####Heatmap of the average relative abundance of each ectomycorrhizal fungal sequences observed in this study.
+
+```{r heatmap}
+#relative abundance
+
+
+colnames(abundance_otu)[1] <- "Distance"
+
+# arrange otu table rows into desired order
+distance_order <- c("Plantation","Invasion Front", "100 m",  "500 m", "1000 m", "2000 m")
+
+abundance_otu <- abundance_otu %>%
+  slice(match(distance_order, Distance))
+
+#make column 1 rownames
+rownames(abundance_otu) <- abundance_otu[,1]
+abundance_otu <- abundance_otu[,-1]
+
+
+#order the otus
+troph_otus <-abundance_otu[, order(colnames(abundance_otu))]
+troph_otus <- as.matrix(troph_otus)
+
+#breaks for the heatmap
+myBreaks <- c(0,seq(0.0000001,0.0001,length=100),seq(0.00011,0.001,length=100),seq(0.0011,0.1,length=100),seq(0.11,1,length=200))
+
+#color palette
+my_palette <- colorRampPalette(c("white","lightskyblue1", "deepskyblue1", "purple", "red"))(n = 500)
+
+#heatmap 
+relative_abundance_tran_heapmap <- pheatmap(troph_otus, cluster_rows = F,cluster_cols = F,breaks= myBreaks, col=my_palette)
+
+relative_abundance_tran_heapmap
+```
+
+
+
+### Observed Species Richness
+
+```{r}
+Distance_num <- c(1,300,400,800,1300,2300)
+ richness_ob <- c(10,15,8,8,9,6)
+ average_biomass <- c(0.7486636,0.5902034,0.6874345,0.5215282,0.6935355,0.6301214)
+
+ observed_richness <- data.frame(Distance_num,richness_ob,average_biomass)
+ 
+ 
+```
+
+
+
+###Table S2: ANOVA of Observed Species Richness and Total Biomass
+
+```{r}
+
+aov_observed_richness <- aov(richness_ob ~ Distance_num, data=observed_richness)
+paste("ANOVA of Richness vs Distance")
+ summary(aov_observed_richness)
+ 
+ aov_biomass_richness <-  aov(richness_ob ~ average_biomass + Distance_num, data=observed_richness)
+ paste("ANOVA of Richness vs Average Biomass")
+ summary(aov_biomass_richness)
+ 
+
+layout(matrix(c(1,2,3,4),2,2)) # optional layout
+plot(aov_observed_richness) # diagnostic plots
+
+
+```
+
+
+
+
+###Figure S3: Richness vs Distance
+####Observed ectomycorrhizal fungal operational taxonomic unit (species) richness over distance from the pine plantation (meters)
+
+```{r}
+  ggplot(observed_richness,aes( x=Distance_num, y=richness_ob)) + geom_point() + #geom_smooth(method="lm") + 
+    labs( x ="Distance (m)", y="Species Richness") +  theme_classic()
+```
+
+
+### Table 2, S6, S7: Bray Curtis Dissimilarity
+
+```{r Bray Curtis}
+
+#get the meta data
+transect_meta_all = as(sample_data(transect_physeq_no_control), "data.frame")
+#the bray curtis
+transect_braycurtis <- phyloseq::distance(transect_physeq_no_control, method="bray")
+#transect number
+transect_number <- transect_physeq_no_control@sam_data$Transect
+#transect distance
+transect_distance <- transect_physeq_no_control@sam_data$Distance
+#transect distance continous
+transect_distance_num <- transect_physeq_no_control@sam_data$Distance_num
+
+#run the PERMANOVA
+
+transect_adonis = adonis(transect_braycurtis ~ transect_distance_num, method="bray", by = "terms", data = transect_meta_all, permutations = 10000)
+print("Table 2: Summary results of PERMANOVA test between community dissimilarity and distance from the plantation")
+transect_adonis
+
+#Test for beta dispersion which tells you if there's a difference in dipsersion that's the source of your significant difference
+beta_dis_tran<-betadisper(transect_braycurtis, transect_number) # multivariate dispersions
+betadisper_number_aov <-anova(beta_dis_tran) # not significant <- report that the disperson wasn't significant 
+
+beta_dis_distance<-betadisper(transect_braycurtis, transect_distance_num) # multivariate dispersions
+betadisper_distance_aov <- anova(beta_dis_distance) # distance is significant which tells us to be cautious about these results
+
+#permutest <- showing you the overall significance, and then the triangle shows the pairwise
+pairwise.beta.disper.results <- permutest(beta_dis_distance, pairwise = TRUE, iter=9999)
+paste("Table S7: Pairwise beta-dispersion test of ectomycorrhizal fungal community dissimilarity over distance and between distance classes")
+pairwise.beta.disper.results
+#As you get away from the plantation, the communities are getting more and more similar than they were
+
+#post hoc test of the distance adonis comparing each distance class
+
+posthoc <- pairwise.adonis(transect_braycurtis, factors=transect_meta_all$Distance_num)
+print("Table S6: Pairwise PERMANOVA of ectomycorrhizal fungal community dissimilarity between distance classes")
+posthoc
+```
+
+
+
+### Figure S4: NMDS
+####  NMDS based on Bray-Curtis values of ectomycorrhizal fungal community dissimilarity at each distance class
+
+```{r NMDS}
+tran_no_cntrl <- ordinate(transect_physeq_no_control, "NMDS","bray",trymax = 20) #change to 1000 later
+
+nmds_transect_no_cntrl <-  plot_ordination(transect_physeq_no_control, tran_no_cntrl, type="samples", color="Distance"
+            #shape="Transect", 
+            ) + stat_ellipse()
+
+nmds_transect_no_cntrl  + theme_classic()
+```
+
+### Figure S5 Mantel correlation
+#### Mantel correlation of Bray-Curtis ectomycorrhizal fungal community dissimilarity values by log distance.
+
+
+```{r Mantel correlation}
+
+#Read in bray curtis table as a matrix, clean up the columns, log the distance
+tran_bray_regression <- matrixConvert(transect_braycurtis, colname = c("Sample 1", "Sample 2", "Bray Curtis Value"))
+
+tran_phyloseq_sample_data$sequencing_id <- row.names(tran_phyloseq_sample_data)
+
+tran_bray_regression$distance_1 <- tran_bray_regression$`Sample 1`
+
+tran_bray_regression$distance_2 <- tran_bray_regression$`Sample 2`
+
+tran_bray_regression$distance_1 <- tran_phyloseq_sample_data[match(tran_bray_regression$`Sample 1`,tran_phyloseq_sample_data$sequencing_id),"Distance_num"]
+
+tran_bray_regression$distance_2 <- tran_phyloseq_sample_data[match(tran_bray_regression$`Sample 2`,tran_phyloseq_sample_data$sequencing_id),"Distance_num"]
+
+tran_bray_regression$Dist_Diff <- log(abs(tran_bray_regression$distance_1 - tran_bray_regression$distance_2))
+
+tran_bray_regression$Dist_Diff[is.infinite(tran_bray_regression$Dist_Diff)] <- 0
+
+#figure
+ggplot(tran_bray_regression, aes(x=Dist_Diff,y=`Bray Curtis Value`)) + geom_point() + geom_smooth(method="lm") + xlab("log(Distance + 1)") + theme_classic()
+
+#regression but isn't as appropiate
+tran_bray_regression_aov <- lm(tran_bray_regression$Dist_Diff ~ tran_bray_regression$`Bray Curtis Value`)
+paste("Linear Regression of the bray curtis disimilarity values and log of the distance")
+summary(tran_bray_regression_aov)
+
+#Mantel
+
+keepvariables = which(sapply(sample_data(transect_physeq_no_control), is.numeric))
+tran_sd = data.frame(sample_data(transect_physeq_no_control))[keepvariables]
+
+
+#function that allows you to extract the OTU table from the phyloseq object
+veganotu = function(physeq) {
+    require("vegan")
+    OTU = otu_table(physeq)
+    if (taxa_are_rows(OTU)) {
+        OTU = t(OTU)
+    }
+    return(as(OTU, "matrix"))
+}
+
+#Make the otu table
+#bioenv(veganotu(transect_physeq_no_control), tran_sd)
+
+otu_table <- veganotu(transect_physeq_no_control)
+
+#abundance data frame
+abund = otu_table[,1:ncol(otu_table)]
+
+#distance
+df_dist <- as(sample_data(transect_physeq_no_control), "data.frame")
+distclass.dist <- dist(df_dist$Distance_num, method = "manhattan")
+dist.matrix <- as.matrix(distclass.dist)
+
+
+#abundance data frame - bray curtis dissimilarity
+dist.abund = vegdist(abund, method = "bray")
+
+
+#abundance vs distance class 
+abund_dist  = mantel(dist.abund, dist.matrix, method = "pearson", permutations = 9999, na.rm = TRUE)
+abund_dist
+
+```
+
+### Figure S6 Relative Abundance of Suillus pungens in bioassays vs in soil
+####Regression of the relative abundance of Suillus pungens reads within the bioassays compared to the estimated S. pungens soil inoculum from soil collected along transects. 
+
+```{r qPCR vs relative abundance}
+#comparing relative abundance to qpcr data
+
+#linear model comparing suillus pungens abundance in the bioassays to the qPCR data of spores in the soil
+s_p_rel_abund_qpcr_lm <- lm(rel_abun ~ est_spores_per_g, data = s_p_rel_abund_qpcr)
+
+summary(s_p_rel_abund_qpcr_lm)
+
+#plot
+ggplot(data = s_p_rel_abund_qpcr, aes(est_spores_per_g, rel_abun)) + geom_point() + geom_smooth(method="lm") + xlab("Estimated Spores Per Gram") + ylab("Suillus pungens Relative Abundance") + theme_classic() +
+  annotate(x=20000000, y=.95, 
+           #label=paste("R^2 = 0.412, p = 0.00680 "),
+           label=paste("R^2 = 0.028, p = 0.039 "),
+           geom="text", size=3)
+
+```
+

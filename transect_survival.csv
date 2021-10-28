@@ -1,0 +1,26 @@
+﻿transect,distance,suvived,died,total
+1,Plantation,8,1,8
+1,Invasion Front,7,1,8
+1,100 m,7,1,8
+1,500 m,6,2,8
+1,1000 m,7,1,8
+1,2000 m,6,2,8
+2,Plantation,7,1,8
+2,Invasion Front,8,0,8
+2,100 m,8,0,8
+2,500 m,7,1,8
+2,1000 m,8,0,8
+2,2000 m,8,0,8
+3,Plantation,7,1,8
+3,Invasion Front,7,1,8
+3,100 m,8,0,8
+3,500 m,8,0,8
+3,1000 m,7,1,8
+3,2000 m,7,1,8
+4,Plantation,7,1,8
+4,Invasion Front,8,0,8
+4,100 m,8,0,8
+4,500 m,8,0,8
+4,1000 m,7,1,8
+4,2000 m,8,0,8
+,Control,13,3,16
